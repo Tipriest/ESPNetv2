@@ -7,6 +7,13 @@ from IOUEval import iouEval
 import time
 import torch
 import numpy as np
+import torch.nn.functional as F
+
+
+def _resize_like(output, target):
+    if output.shape[2:] != target.shape[1:]:
+        output = F.interpolate(output, size=target.shape[1:], mode='bilinear', align_corners=True)
+    return output
 
 
 def poly_lr_scheduler(args, optimizer, epoch, power=0.9):
@@ -41,6 +48,7 @@ def val(args, val_loader, model, criterion):
 
         # run the mdoel
         output1 = model(input)
+        output1 = _resize_like(output1, target)
 
         # compute the loss
         loss = criterion(output1, target)
@@ -87,6 +95,8 @@ def train(args, train_loader, model, criterion, optimizer, epoch):
 
         #run the mdoel
         output1, output2 = model(input)
+        output1 = _resize_like(output1, target)
+        output2 = _resize_like(output2, target)
 
         #set the grad to zero
         optimizer.zero_grad()

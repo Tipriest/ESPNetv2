@@ -40,7 +40,8 @@ def trainValidateSegmentation(args):
 
     # check if processed data file exists or not
     if not os.path.isfile(args.cached_data_file):
-        dataLoad = ld.LoadData(args.data_dir, args.classes, args.cached_data_file)
+        dataLoad = ld.LoadData(args.data_dir, args.classes, args.cached_data_file,
+                               ignore_label=args.ignore_label, map_ignore_to=args.map_ignore_to)
         data = dataLoad.processData()
         if data is None:
             print('Error while pickling data. Please check.')
@@ -62,7 +63,7 @@ def trainValidateSegmentation(args):
     if args.onGPU:
         weight = weight.cuda()
 
-    criteria = torch.nn.CrossEntropyLoss(weight) #weight
+    criteria = torch.nn.CrossEntropyLoss(weight, ignore_index=args.ignore_label)
 
     if args.onGPU:
         criteria = criteria.cuda()
@@ -116,7 +117,7 @@ def trainValidateSegmentation(args):
 
     valDataset = myTransforms.Compose([
         myTransforms.Normalize(mean=data['mean'], std=data['std']),
-        myTransforms.Scale(1024, 512),
+        myTransforms.Scale(args.inWidth, args.inHeight),
         myTransforms.ToTensor(args.scaleIn),
         #
     ])
@@ -125,27 +126,33 @@ def trainValidateSegmentation(args):
     # so that we can generate more augmented data and prevent the network from overfitting
 
     trainLoader = torch.utils.data.DataLoader(
-        myDataLoader.MyDataset(data['trainIm'], data['trainAnnot'], transform=trainDataset_main),
+        myDataLoader.MyDataset(data['trainIm'], data['trainAnnot'], transform=trainDataset_main,
+                       ignore_label=args.ignore_label, map_ignore_to=args.map_ignore_to),
         batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=True)
 
     trainLoader_scale1 = torch.utils.data.DataLoader(
-        myDataLoader.MyDataset(data['trainIm'], data['trainAnnot'], transform=trainDataset_scale1),
+        myDataLoader.MyDataset(data['trainIm'], data['trainAnnot'], transform=trainDataset_scale1,
+                       ignore_label=args.ignore_label, map_ignore_to=args.map_ignore_to),
         batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=True)
 
     trainLoader_scale2 = torch.utils.data.DataLoader(
-        myDataLoader.MyDataset(data['trainIm'], data['trainAnnot'], transform=trainDataset_scale2),
+        myDataLoader.MyDataset(data['trainIm'], data['trainAnnot'], transform=trainDataset_scale2,
+                       ignore_label=args.ignore_label, map_ignore_to=args.map_ignore_to),
         batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=True)
 
     trainLoader_scale3 = torch.utils.data.DataLoader(
-        myDataLoader.MyDataset(data['trainIm'], data['trainAnnot'], transform=trainDataset_scale3),
+        myDataLoader.MyDataset(data['trainIm'], data['trainAnnot'], transform=trainDataset_scale3,
+                       ignore_label=args.ignore_label, map_ignore_to=args.map_ignore_to),
         batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=True)
 
     trainLoader_scale4 = torch.utils.data.DataLoader(
-        myDataLoader.MyDataset(data['trainIm'], data['trainAnnot'], transform=trainDataset_scale4),
+        myDataLoader.MyDataset(data['trainIm'], data['trainAnnot'], transform=trainDataset_scale4,
+                       ignore_label=args.ignore_label, map_ignore_to=args.map_ignore_to),
         batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=True)
 
     valLoader = torch.utils.data.DataLoader(
-        myDataLoader.MyDataset(data['valIm'], data['valAnnot'], transform=valDataset),
+        myDataLoader.MyDataset(data['valIm'], data['valAnnot'], transform=valDataset,
+                       ignore_label=args.ignore_label, map_ignore_to=args.map_ignore_to),
         batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers, pin_memory=True)
 
     if args.onGPU:
@@ -181,7 +188,8 @@ def trainValidateSegmentation(args):
     else:
         logger = open(logFileLoc, 'w')
         logger.write("Parameters: %s" % (str(total_paramters)))
-        logger.write("\n%s\t%s\t%s\t%s\t%s\t" % ('Epoch', 'Loss(Tr)', 'Loss(val)', 'mIOU (tr)', 'mIOU (val'))
+        logger.write("\n{}\t{}\t{}\t{}\t{}\t".format(
+            'Epoch', 'Loss(Tr)', 'Loss(val)', 'mIOU (tr)', 'mIOU (val)'))
     logger.flush()
 
 
@@ -208,7 +216,7 @@ def trainValidateSegmentation(args):
 
         is_best = mIOU_val > best_val
         best_val = max(mIOU_val, best_val)
-        
+
         save_checkpoint({
             'epoch': epoch + 1,
             'state_dict': model.state_dict(),
@@ -244,6 +252,7 @@ if __name__ == '__main__':
 
     parser = ArgumentParser()
     parser.add_argument('--model', default="ESPNetv2", help='Model name')
+    parser.add_argument('--dataset', default="cityscapes", help='dataset: cityscapes or ctem')
     parser.add_argument('--data_dir', default="./city", help='Data directory')
     parser.add_argument('--inWidth', type=int, default=1024, help='Width of RGB image')
     parser.add_argument('--inHeight', type=int, default=512, help='Height of RGB image')
@@ -255,12 +264,27 @@ if __name__ == '__main__':
     parser.add_argument('--step_loss', type=int, default=100, help='Decrease learning rate after how many epochs.')
     parser.add_argument('--lr', type=float, default=5e-4, help='Initial learning rate')
     parser.add_argument('--savedir', default='./results_espnetv2_', help='directory to save the results')
-    parser.add_argument('--resume', type=str, default='', help='Use this flag to load last checkpoint for training')  #
+    parser.add_argument('--resume', type=str, default='', help='Use this flag to load last checkpoint for training')
     parser.add_argument('--classes', type=int, default=20, help='No of classes in the dataset. 20 for cityscapes')
     parser.add_argument('--cached_data_file', default='city.p', help='Cached file name')
+    parser.add_argument('--ignore_label', type=int, default=255, help='Ignore label in ground truth masks')
+    parser.add_argument('--map_ignore_to', type=int, default=19,
+                        help='Map ignore label to class index (set to -1 to disable mapping)')
     parser.add_argument('--logFile', default='trainValLog.txt', help='File that stores the training and validation logs')
     parser.add_argument('--pretrained', default='', help='Pretrained ESPNetv2 weights.')
     parser.add_argument('--s', default=1, type=float, help='scaling parameter')
 
-    trainValidateSegmentation(parser.parse_args())
+    args = parser.parse_args()
+
+    if args.map_ignore_to < 0:
+        args.map_ignore_to = None
+
+    if args.dataset == 'ctem':
+        args.classes = 6
+        args.inWidth = 960
+        args.inHeight = 540
+        args.cached_data_file = 'ctem.p'
+        args.map_ignore_to = None
+
+    trainValidateSegmentation(args)
 

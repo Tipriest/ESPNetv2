@@ -14,7 +14,7 @@ class MyDataset(torch.utils.data.Dataset):
     '''
     Class to load the dataset
     '''
-    def __init__(self, imList, labelList, transform=None):
+    def __init__(self, imList, labelList, transform=None, ignore_label=255, map_ignore_to=19):
         '''
         :param imList: image list (Note that these lists have been processed and pickled using the loadData.py)
         :param labelList: label list (Note that these lists have been processed and pickled using the loadData.py)
@@ -23,6 +23,8 @@ class MyDataset(torch.utils.data.Dataset):
         self.imList = imList
         self.labelList = labelList
         self.transform = transform
+        self.ignore_label = ignore_label
+        self.map_ignore_to = map_ignore_to
 
     def __len__(self):
         return len(self.imList)
@@ -37,9 +39,8 @@ class MyDataset(torch.utils.data.Dataset):
         label_name = self.labelList[idx]
         image = cv2.imread(image_name)
         label = cv2.imread(label_name, 0)
-        # if you have 255 label in your label files, map it to the background class (19) in the Cityscapes dataset
-        if 255 in np.unique(label):
-            label[label==255] = 19
+        if self.map_ignore_to is not None and self.ignore_label in np.unique(label):
+            label[label == self.ignore_label] = self.map_ignore_to
 
         if self.transform:
             [image, label] = self.transform(image, label)

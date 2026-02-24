@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import cv2
 import pickle
@@ -13,7 +14,7 @@ class LoadData:
     '''
     Class to laod the data
     '''
-    def __init__(self, data_dir, classes, cached_data_file, normVal=1.10):
+    def __init__(self, data_dir, classes, cached_data_file, normVal=1.10, ignore_label=255, map_ignore_to=None):
         '''
         :param data_dir: directory where the dataset is kept
         :param classes: number of classes in the dataset
@@ -31,6 +32,8 @@ class LoadData:
         self.trainAnnotList = list()
         self.valAnnotList = list()
         self.cached_data_file = cached_data_file
+        self.ignore_label = ignore_label
+        self.map_ignore_to = map_ignore_to
 
     def compute_class_weights(self, histogram):
         '''
@@ -55,28 +58,45 @@ class LoadData:
         no_files = 0
         min_val_al = 0
         max_val_al = 0
-        with open(self.data_dir + '/' + fileName, 'r') as textFile:
+        list_path = os.path.join(self.data_dir, fileName)
+        if not os.path.isfile(list_path):
+            list_path = os.path.join(self.data_dir, 'ImageSets', fileName)
+
+        with open(list_path, 'r') as textFile:
             for line in textFile:
-                # we expect the text file to contain the data in following format
-                # <RGB Image>, <Label Image>
-                line_arr = line.split(',')
-                img_file = ((self.data_dir).strip() + '/' + line_arr[0].strip()).strip()
-                label_file = ((self.data_dir).strip() + '/' + line_arr[1].strip()).strip()
+                # we expect either CSV format: <RGB Image>, <Label Image>
+                # or CTEM format: <image_id>
+                line = line.strip()
+                if ',' in line:
+                    line_arr = line.split(',')
+                    img_file = ((self.data_dir).strip() + '/' + line_arr[0].strip()).strip()
+                    label_file = ((self.data_dir).strip() + '/' + line_arr[1].strip()).strip()
+                else:
+                    img_file = os.path.join(self.data_dir, 'JPEGImages', line + '.jpg')
+                    label_file = os.path.join(self.data_dir, 'SegmentationClass', line + '.png')
+
                 label_img = cv2.imread(label_file, 0)
                 unique_values = np.unique(label_img)
-                # if you have 255 label in your label files, map it to the background class (19) in the Cityscapes dataset
-                if 255 in unique_values:
-	                label_img[label_img==255] = 19
-                
-                max_val = max(unique_values)
-                min_val = min(unique_values)
+                if self.map_ignore_to is not None and self.ignore_label in unique_values:
+                    label_img[label_img == self.ignore_label] = self.map_ignore_to
+                    unique_values = np.unique(label_img)
+
+                valid_mask = label_img != self.ignore_label
+                if np.any(valid_mask):
+                    valid_values = label_img[valid_mask]
+                    max_val = int(valid_values.max())
+                    min_val = int(valid_values.min())
+                else:
+                    max_val = -1
+                    min_val = -1
 
                 max_val_al = max(max_val, max_val_al)
                 min_val_al = min(min_val, min_val_al)
 
                 if trainStg == True:
-                    hist = np.histogram(label_img, self.classes)
-                    global_hist += hist[0]
+                    if np.any(valid_mask):
+                        hist = np.histogram(label_img[valid_mask], self.classes, [0, self.classes - 1])
+                        global_hist += hist[0]
 
                     rgb_img = cv2.imread(img_file)
                     self.mean[0] += np.mean(rgb_img[:,:,0])
@@ -93,7 +113,7 @@ class LoadData:
                     self.valImList.append(img_file)
                     self.valAnnotList.append(label_file)
 
-                if max_val > (self.classes - 1) or min_val < 0:
+                if np.any(valid_mask) and (max_val > (self.classes - 1) or min_val < 0):
                     print('Labels can take value between 0 and number of classes {}.'.format(self.classes-1))
                     print('You have following values as class labels:')
                     print(unique_values)

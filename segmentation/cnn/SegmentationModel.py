@@ -50,22 +50,31 @@ class EESPNet_Seg(nn.Module):
             x = F.interpolate(x, scale_factor=2, mode='bilinear', align_corners=True)
         return x
 
+    def _resize_like(self, src, ref):
+        if src.shape[2:] != ref.shape[2:]:
+            src = F.interpolate(src, size=ref.shape[2:], mode='bilinear', align_corners=True)
+        return src
+
 
     def forward(self, input):
         out_l1, out_l2, out_l3, out_l4 = self.net(input, seg=True)
         out_l4_proj = self.proj_L4_C(out_l4)
         up_l4_to_l3 = F.interpolate(out_l4_proj, scale_factor=2, mode='bilinear', align_corners=True)
+        up_l4_to_l3 = self._resize_like(up_l4_to_l3, out_l3)
         merged_l3_upl4 = self.pspMod(torch.cat([out_l3, up_l4_to_l3], 1))
         proj_merge_l3_bef_act = self.project_l3(merged_l3_upl4)
         proj_merge_l3 = self.act_l3(proj_merge_l3_bef_act)
         out_up_l3 = F.interpolate(proj_merge_l3, scale_factor=2, mode='bilinear', align_corners=True)
+        out_up_l3 = self._resize_like(out_up_l3, out_l2)
         merge_l2 = self.project_l2(torch.cat([out_l2, out_up_l3], 1))
         out_up_l2 = F.interpolate(merge_l2, scale_factor=2, mode='bilinear', align_corners=True)
+        out_up_l2 = self._resize_like(out_up_l2, out_l1)
         merge_l1 = self.project_l1(torch.cat([out_l1, out_up_l2], 1))
+        out_up_l1 = self._resize_like(merge_l1, input)
         if self.training:
-            return F.interpolate(merge_l1, scale_factor=2, mode='bilinear', align_corners=True), self.hierarchicalUpsample(proj_merge_l3_bef_act)
+            return F.interpolate(out_up_l1, scale_factor=2, mode='bilinear', align_corners=True), self.hierarchicalUpsample(proj_merge_l3_bef_act)
         else:
-            return F.interpolate(merge_l1, scale_factor=2, mode='bilinear', align_corners=True)
+            return F.interpolate(out_up_l1, scale_factor=2, mode='bilinear', align_corners=True)
 
 
 if __name__ == '__main__':
