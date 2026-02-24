@@ -11,11 +11,45 @@ from train_utils import train, val, netParams, save_checkpoint, poly_lr_schedule
 import torch.optim.lr_scheduler
 
 
+def reset_cuda_mem():
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
+        torch.cuda.synchronize()
+
+
+def print_cuda_mem(tag=""):
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+        alloc = torch.cuda.memory_allocated() / 1024**2
+        reserved = torch.cuda.memory_reserved() / 1024**2
+        peak = torch.cuda.max_memory_allocated() / 1024**2
+        print(
+            f"[CUDA Mem] {tag} | "
+            f"allocated={alloc:.1f} MB, reserved={reserved:.1f} MB, peak={peak:.1f} MB"
+        )
+
+
 #============================================
 __author__ = "Sachin Mehta"
 __license__ = "MIT"
 __maintainer__ = "Sachin Mehta"
 #============================================
+
+def _build_ctem_test_lists(data_dir):
+    list_path = os.path.join(data_dir, 'TestSet', 'ImageSets', 'test.txt')
+    test_root = os.path.join(data_dir, 'TestSet')
+    im_list = []
+    label_list = []
+    with open(list_path, 'r') as handle:
+        for line in handle:
+            name = line.strip()
+            if not name:
+                continue
+            im_list.append(os.path.join(test_root, 'JPEGImages', name + '.jpg'))
+            label_list.append(os.path.join(test_root, 'SegmentationClass', name + '.png'))
+    return im_list, label_list
+
 
 def trainValidateSegmentation(args):
     '''
@@ -181,6 +215,14 @@ def trainValidateSegmentation(args):
         else:
             print("=> no checkpoint found at '{}'".format(args.resume))
 
+    if args.model_path:
+        if os.path.isfile(args.model_path):
+            print("=> loading model weights '{}'".format(args.model_path))
+            state_dict = torch.load(args.model_path)
+            model.load_state_dict(state_dict)
+        else:
+            print("=> no model weights found at '{}'".format(args.model_path))
+
 
     logFileLoc = args.savedir + args.logFile
     if os.path.isfile(logFileLoc):
@@ -193,6 +235,27 @@ def trainValidateSegmentation(args):
     logger.flush()
 
 
+
+    if args.eval_only:
+        if args.eval_split == 'test' and args.dataset == 'ctem':
+            test_im, test_annot = _build_ctem_test_lists(args.data_dir)
+            eval_loader = torch.utils.data.DataLoader(
+                myDataLoader.MyDataset(test_im, test_annot, transform=valDataset,
+                                       ignore_label=args.ignore_label, map_ignore_to=args.map_ignore_to),
+                batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers, pin_memory=True)
+        else:
+            eval_loader = valLoader
+
+        reset_cuda_mem()
+        lossVal, overall_acc_val, per_class_acc_val, per_class_iu_val, mIOU_val = val(
+            args, eval_loader, model, criteria)
+        print_cuda_mem(tag=f"eval:{args.eval_split}")
+        print("Eval split: {}".format(args.eval_split))
+        print("Loss = {:.4f} mIOU = {:.4f}".format(lossVal, mIOU_val))
+        print("Per Class Acc: {}".format(per_class_acc_val))
+        print("Per Class mIoU: {}".format(per_class_iu_val))
+        logger.close()
+        return
 
     for epoch in range(start_epoch, args.max_epochs):
 
@@ -273,6 +336,9 @@ if __name__ == '__main__':
     parser.add_argument('--logFile', default='trainValLog.txt', help='File that stores the training and validation logs')
     parser.add_argument('--pretrained', default='', help='Pretrained ESPNetv2 weights.')
     parser.add_argument('--s', default=1, type=float, help='scaling parameter')
+    parser.add_argument('--eval_only', action='store_true', help='Only run evaluation (no training)')
+    parser.add_argument('--eval_split', default='val', choices=['val', 'test'], help='Split to evaluate')
+    parser.add_argument('--model_path', default='', help='Path to model weights for evaluation')
 
     args = parser.parse_args()
 

@@ -150,4 +150,13 @@ python segmentation/main.py \
   --max_epochs 1000 \
   --batch_size 2 \
   --lr 1e-3
+
+
+python segmentation/main.py \
+  --dataset ctem \
+  --data_dir /home/tipriest/Documents/CVTask/CTEM \
+  --eval_only \
+  --eval_split test \
+  --batch_size 1 \
+  --model_path /home/tipriest/Documents/CVTask/ESPNetv2/results_espnetv2_1/model_best.pth
 ```
